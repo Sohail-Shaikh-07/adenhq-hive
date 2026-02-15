@@ -58,6 +58,7 @@ from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
+from .jira_tool import register_tools as register_jira
 
 
 def register_all_tools(
@@ -100,7 +101,9 @@ def register_all_tools(
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_google_maps(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
+    register_jira(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -282,7 +285,25 @@ def register_all_tools(
         "maps_place_details",
         "maps_place_search",
         "run_bigquery_query",
+        "run_bigquery_query",
         "describe_dataset",
+        "jira_get_issue",
+        "jira_search_issues",
+        "jira_create_issue",
+        "jira_add_comment",
+        "jira_add_comment",
+        "jira_get_transitions",
+        "jira_transition_issue",
+        "jira_find_user",
+        "jira_assign_issue",
+        "jira_add_attachment",
+        "jira_get_attachment",
+        "jira_get_all_boards",
+        "jira_get_sprints",
+        "jira_add_issue_to_sprint",
+        "jira_get_components",
+        "jira_set_component",
+        "jira_create_version",
     ]
 
 
