@@ -77,3 +77,6 @@ core/tests/*dumps/*
 
 screenshots/*
 
+
+# Local Scripts
+scripts/test_jira_tool.py
