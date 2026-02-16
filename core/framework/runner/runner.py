@@ -290,12 +290,12 @@ class AgentRunner:
         self._llm: LLMProvider | None = None
         self._approval_callback: Callable | None = None
 
-        # AgentRuntime â€” unified execution path for all agents
+        # AgentRuntime Ã¢â‚¬â€ unified execution path for all agents
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
 
         # Validate credentials before spawning MCP servers.
-        # Fails fast with actionable guidance â€” no MCP noise on screen.
+        # Fails fast with actionable guidance Ã¢â‚¬â€ no MCP noise on screen.
         self._validate_credentials()
 
         # Auto-discover tools from tools.py
@@ -593,8 +593,8 @@ class AgentRunner:
                 # Get OAuth token from Claude Code subscription
                 api_key = get_claude_code_token()
                 if not api_key:
-                    print("Warning: Claude Code subscription configured but no token found.")
-                    print("Authenticate your Claude Code subscription in your coding client, or disable use_claude_code_subscription in ~/.hive/configuration.json.")
+                    print("Warning: Subscription-based auth is enabled but no access token was found.")
+                    print("Authenticate the configured subscription in your coding client, or disable use_claude_code_subscription in ~/.hive/configuration.json.")
 
             if api_key:
                 # Use Claude Code subscription token
