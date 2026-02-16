@@ -173,60 +173,6 @@ UV_VERSION=$(uv --version)
 echo -e "${GREEN}  ✓ uv detected: $UV_VERSION${NC}"
 echo ""
 
-# Check for Node.js (needed for frontend dashboard)
-NODE_AVAILABLE=false
-if command -v node &> /dev/null; then
-    NODE_VERSION=$(node --version)
-    NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/v//' | cut -d. -f1)
-    if [ "$NODE_MAJOR" -ge 20 ]; then
-        echo -e "${GREEN}  ✓ Node.js $NODE_VERSION${NC}"
-        NODE_AVAILABLE=true
-    else
-        echo -e "${YELLOW}  ⚠ Node.js $NODE_VERSION found (20+ required for frontend)${NC}"
-        echo -e "${YELLOW}  Installing Node.js 20 via nvm...${NC}"
-        # Install nvm if not present
-        if [ -z "${NVM_DIR:-}" ] || [ ! -s "$NVM_DIR/nvm.sh" ]; then
-            export NVM_DIR="$HOME/.nvm"
-            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash 2>/dev/null
-        fi
-        # Source nvm and install Node 20
-        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-        if nvm install 20 > /dev/null 2>&1 && nvm use 20 > /dev/null 2>&1; then
-            NODE_VERSION=$(node --version)
-            echo -e "${GREEN}  ✓ Node.js $NODE_VERSION installed via nvm${NC}"
-            NODE_AVAILABLE=true
-        else
-            echo -e "${RED}  ✗ Node.js installation failed${NC}"
-            echo -e "${DIM}    Install manually from https://nodejs.org${NC}"
-        fi
-    fi
-else
-    echo -e "${YELLOW}  Node.js not found. Installing via nvm...${NC}"
-    # Install nvm if not present
-    if [ -z "${NVM_DIR:-}" ] || [ ! -s "$NVM_DIR/nvm.sh" ]; then
-        export NVM_DIR="$HOME/.nvm"
-        if ! curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh 2>/dev/null | bash 2>/dev/null; then
-            echo -e "${RED}  ✗ nvm installation failed${NC}"
-            echo -e "${DIM}    Install Node.js 20+ manually from https://nodejs.org${NC}"
-        fi
-    fi
-    # Source nvm and install Node 20
-    if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
-        export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-        . "$NVM_DIR/nvm.sh"
-        if nvm install 20 > /dev/null 2>&1 && nvm use 20 > /dev/null 2>&1; then
-            NODE_VERSION=$(node --version)
-            echo -e "${GREEN}  ✓ Node.js $NODE_VERSION installed via nvm${NC}"
-            NODE_AVAILABLE=true
-        else
-            echo -e "${RED}  ✗ Node.js installation failed${NC}"
-            echo -e "${DIM}    Install manually from https://nodejs.org${NC}"
-        fi
-    fi
-fi
-
-echo ""
-
 # ============================================================
 # Step 2: Install Python Packages
 # ============================================================
@@ -270,40 +216,6 @@ echo ""
 echo -e "${GREEN}⬢${NC} All packages installed"
 echo ""
 
-# Build frontend (if Node.js is available)
-FRONTEND_BUILT=false
-if [ "$NODE_AVAILABLE" = true ]; then
-    echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Building frontend dashboard...${NC}"
-    echo ""
-    FRONTEND_DIR="$SCRIPT_DIR/core/frontend"
-    if [ -f "$FRONTEND_DIR/package.json" ]; then
-        echo -n "  Installing npm packages... "
-        if (cd "$FRONTEND_DIR" && npm install --no-fund --no-audit) > /dev/null 2>&1; then
-            echo -e "${GREEN}ok${NC}"
-        else
-            echo -e "${RED}failed${NC}"
-            NODE_AVAILABLE=false
-        fi
-
-        if [ "$NODE_AVAILABLE" = true ]; then
-            # Clean stale tsbuildinfo cache — tsc -b incremental builds fail
-            # silently when these are out of sync with source files
-            rm -f "$FRONTEND_DIR"/tsconfig*.tsbuildinfo
-            echo -n "  Building frontend... "
-            if (cd "$FRONTEND_DIR" && npm run build) > /dev/null 2>&1; then
-                echo -e "${GREEN}ok${NC}"
-                echo -e "${GREEN}  ✓ Frontend built → core/frontend/dist/${NC}"
-                FRONTEND_BUILT=true
-            else
-                echo -e "${RED}failed${NC}"
-                echo -e "${YELLOW}  ⚠ Frontend build failed. The web dashboard won't be available.${NC}"
-                echo -e "${DIM}    Run 'cd core/frontend && npm run build' manually to debug.${NC}"
-            fi
-        fi
-    fi
-    echo ""
-fi
-
 # ============================================================
 # Step 3: Configure LLM API Key
 # ============================================================
@@ -321,7 +233,7 @@ echo ""
 IMPORT_ERRORS=0
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>/dev/null)
+CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>&1)
 CHECK_EXIT=$?
 
 # Parse and display results
@@ -373,10 +285,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 4: Verify Agent Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
+echo -e "${BLUE}Step 4: Verifying agent skills...${NC}"
 echo ""
 
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
@@ -407,7 +319,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-haiku-4-5-20251001"
+        ["anthropic"]="claude-haiku-4-5"
         ["openai"]="gpt-5-mini"
         ["gemini"]="gemini-3-flash-preview"
         ["groq"]="moonshotai/kimi-k2-instruct-0905"
@@ -420,14 +332,15 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     # Model choices per provider: composite-key associative arrays
     # Keys: "provider:index" -> value
     declare -A MODEL_CHOICES_ID=(
-        ["anthropic:0"]="claude-haiku-4-5-20251001"
-        ["anthropic:1"]="claude-sonnet-4-20250514"
-        ["anthropic:2"]="claude-sonnet-4-5-20250929"
-        ["anthropic:3"]="claude-opus-4-6"
-        ["openai:0"]="gpt-5-mini"
-        ["openai:1"]="gpt-5.2"
+        ["anthropic:0"]="claude-opus-4-6"
+        ["anthropic:1"]="claude-sonnet-4-5-20250929"
+        ["anthropic:2"]="claude-sonnet-4-20250514"
+        ["anthropic:3"]="claude-haiku-4-5-20251001"
+        ["openai:0"]="gpt-5.2"
+        ["openai:1"]="gpt-5-mini"
+        ["openai:2"]="gpt-5-nano"
         ["gemini:0"]="gemini-3-flash-preview"
-        ["gemini:1"]="gemini-3.1-pro-preview"
+        ["gemini:1"]="gemini-3-pro-preview"
         ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
         ["groq:1"]="openai/gpt-oss-120b"
         ["cerebras:0"]="zai-glm-4.7"
@@ -435,14 +348,15 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A MODEL_CHOICES_LABEL=(
-        ["anthropic:0"]="Haiku 4.5 - Fast + cheap (recommended)"
-        ["anthropic:1"]="Sonnet 4 - Fast + capable"
-        ["anthropic:2"]="Sonnet 4.5 - Best balance"
-        ["anthropic:3"]="Opus 4.6 - Most capable"
-        ["openai:0"]="GPT-5 Mini - Fast + cheap (recommended)"
-        ["openai:1"]="GPT-5.2 - Most capable"
+        ["anthropic:0"]="Opus 4.6 - Most capable (recommended)"
+        ["anthropic:1"]="Sonnet 4.5 - Best balance"
+        ["anthropic:2"]="Sonnet 4 - Fast + capable"
+        ["anthropic:3"]="Haiku 4.5 - Fast + cheap"
+        ["openai:0"]="GPT-5.2 - Most capable (recommended)"
+        ["openai:1"]="GPT-5 Mini - Fast + cheap"
+        ["openai:2"]="GPT-5 Nano - Fastest"
         ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
-        ["gemini:1"]="Gemini 3.1 Pro - Best quality"
+        ["gemini:1"]="Gemini 3 Pro - Best quality"
         ["groq:0"]="Kimi K2 - Best quality (recommended)"
         ["groq:1"]="GPT-OSS 120B - Fast reasoning"
         ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
@@ -450,12 +364,13 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A MODEL_CHOICES_MAXTOKENS=(
-        ["anthropic:0"]=8192
-        ["anthropic:1"]=8192
-        ["anthropic:2"]=16384
-        ["anthropic:3"]=32768
+        ["anthropic:0"]=32768
+        ["anthropic:1"]=16384
+        ["anthropic:2"]=8192
+        ["anthropic:3"]=8192
         ["openai:0"]=16384
         ["openai:1"]=16384
+        ["openai:2"]=16384
         ["gemini:0"]=8192
         ["gemini:1"]=8192
         ["groq:0"]=8192
@@ -466,7 +381,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
 
     declare -A MODEL_CHOICES_COUNT=(
         ["anthropic"]=4
-        ["openai"]=2
+        ["openai"]=3
         ["gemini"]=2
         ["groq"]=2
         ["cerebras"]=2
@@ -508,7 +423,7 @@ else
 
     # Default models by provider id (parallel arrays)
     MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    MODEL_DEFAULTS=("claude-opus-4-6" "gpt-5.2" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -550,11 +465,11 @@ else
     }
 
     # Model choices per provider - flat parallel arrays with provider offsets
-    # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-haiku-4-5-20251001" "claude-sonnet-4-20250514" "claude-sonnet-4-5-20250929" "claude-opus-4-6" "gpt-5-mini" "gpt-5.2" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Haiku 4.5 - Fast + cheap (recommended)" "Sonnet 4 - Fast + capable" "Sonnet 4.5 - Best balance" "Opus 4.6 - Most capable" "GPT-5 Mini - Fast + cheap (recommended)" "GPT-5.2 - Most capable" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(8192 8192 16384 32768 16384 16384 8192 8192 8192 8192 8192 8192)
+    # Provider order: anthropic(4), openai(3), gemini(2), groq(2), cerebras(2)
+    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai openai gemini gemini groq groq cerebras cerebras)
+    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gpt-5-nano" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192)
 
     # Helper: get number of model choices for a provider
     get_model_choice_count() {
@@ -687,19 +602,6 @@ prompt_model_selection() {
     echo -e "${BOLD}Select a model:${NC}"
     echo ""
 
-    # Find default index from previous model (if same provider)
-    local default_idx=""
-    if [ -n "$PREV_MODEL" ] && [ "$provider_id" = "$PREV_PROVIDER" ]; then
-        local j=0
-        while [ $j -lt "$count" ]; do
-            if [ "$(get_model_choice_id "$provider_id" "$j")" = "$PREV_MODEL" ]; then
-                default_idx=$((j + 1))
-                break
-            fi
-            j=$((j + 1))
-        done
-    fi
-
     local i=0
     while [ $i -lt "$count" ]; do
         local label
@@ -714,12 +616,7 @@ prompt_model_selection() {
 
     local choice
     while true; do
-        if [ -n "$default_idx" ]; then
-            read -r -p "Enter choice (1-$count) [$default_idx]: " choice || true
-            choice="${choice:-$default_idx}"
-        else
-            read -r -p "Enter choice (1-$count): " choice || true
-        fi
+        read -r -p "Enter choice (1-$count): " choice || true
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
             local idx=$((choice - 1))
             SELECTED_MODEL="$(get_model_choice_id "$provider_id" "$idx")"
@@ -799,9 +696,7 @@ SUBSCRIPTION_MODE=""    # "claude_code" | "codex" | "zai_code" | ""
 
 # ── Credential detection (silent — just set flags) ───────────
 CLAUDE_CRED_DETECTED=false
-if command -v security &>/dev/null && security find-generic-password -s "Claude Code-credentials" &>/dev/null 2>&1; then
-    CLAUDE_CRED_DETECTED=true
-elif [ -f "$HOME/.claude/.credentials.json" ]; then
+if [ -f "$HOME/.claude/.credentials.json" ]; then
     CLAUDE_CRED_DETECTED=true
 fi
 
@@ -832,65 +727,6 @@ else
             FOUND_ENV_VARS+=("$env_var")
         fi
     done
-fi
-
-# ── Read previous configuration (if any) ──────────────────────
-PREV_PROVIDER=""
-PREV_MODEL=""
-PREV_ENV_VAR=""
-PREV_SUB_MODE=""
-if [ -f "$HIVE_CONFIG_FILE" ]; then
-    eval "$($PYTHON_CMD -c "
-import json, sys
-try:
-    with open('$HIVE_CONFIG_FILE') as f:
-        c = json.load(f)
-    llm = c.get('llm', {})
-    print(f'PREV_PROVIDER={llm.get(\"provider\", \"\")}')
-    print(f'PREV_MODEL={llm.get(\"model\", \"\")}')
-    print(f'PREV_ENV_VAR={llm.get(\"api_key_env_var\", \"\")}')
-    sub = ''
-    if llm.get('use_claude_code_subscription'): sub = 'claude_code'
-    elif llm.get('use_codex_subscription'): sub = 'codex'
-    elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
-    print(f'PREV_SUB_MODE={sub}')
-except Exception:
-    pass
-" 2>/dev/null)" || true
-fi
-
-# Compute default menu number from previous config (only if credential is still valid)
-DEFAULT_CHOICE=""
-if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
-    PREV_CRED_VALID=false
-    case "$PREV_SUB_MODE" in
-        claude_code) [ "$CLAUDE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
-        zai_code)    [ "$ZAI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
-        codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
-        *)
-            # API key provider — check if the env var is set
-            if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
-                PREV_CRED_VALID=true
-            fi
-            ;;
-    esac
-
-    if [ "$PREV_CRED_VALID" = true ]; then
-        case "$PREV_SUB_MODE" in
-            claude_code) DEFAULT_CHOICE=1 ;;
-            zai_code)    DEFAULT_CHOICE=2 ;;
-            codex)       DEFAULT_CHOICE=3 ;;
-        esac
-        if [ -z "$DEFAULT_CHOICE" ]; then
-            case "$PREV_PROVIDER" in
-                anthropic) DEFAULT_CHOICE=4 ;;
-                openai)    DEFAULT_CHOICE=5 ;;
-                gemini)    DEFAULT_CHOICE=6 ;;
-                groq)      DEFAULT_CHOICE=7 ;;
-                cerebras)  DEFAULT_CHOICE=8 ;;
-            esac
-        fi
-    fi
 fi
 
 # ── Show unified provider selection menu ─────────────────────
@@ -927,8 +763,7 @@ PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY
 PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier")
 for idx in 0 1 2 3 4; do
     num=$((idx + 4))
-    env_var="${PROVIDER_MENU_ENVS[$idx]}"
-    if [ -n "${!env_var}" ]; then
+    if [ -n "${!PROVIDER_MENU_ENVS[$idx]}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
     else
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}"
@@ -938,18 +773,8 @@ done
 echo -e "  ${CYAN}9)${NC} Skip for now"
 echo ""
 
-if [ -n "$DEFAULT_CHOICE" ]; then
-    echo -e "  ${DIM}Previously configured: ${PREV_PROVIDER}/${PREV_MODEL}. Press Enter to keep.${NC}"
-    echo ""
-fi
-
 while true; do
-    if [ -n "$DEFAULT_CHOICE" ]; then
-        read -r -p "Enter choice (1-9) [$DEFAULT_CHOICE]: " choice || true
-        choice="${choice:-$DEFAULT_CHOICE}"
-    else
-        read -r -p "Enter choice (1-9): " choice || true
-    fi
+    read -r -p "Enter choice (1-9): " choice || true
     if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 9 ]; then
         break
     fi
@@ -965,7 +790,7 @@ case $choice in
             echo -e "  Run ${CYAN}claude${NC} first to authenticate with your Claude subscription,"
             echo -e "  then run this quickstart again."
             echo ""
-            exit 1
+            SELECTED_PROVIDER_ID=""
         else
             SUBSCRIPTION_MODE="claude_code"
             SELECTED_PROVIDER_ID="anthropic"
@@ -993,16 +818,12 @@ case $choice in
             echo ""
             echo -e "${YELLOW}  Codex credentials not found. Starting OAuth login...${NC}"
             echo ""
-            if uv run python "$SCRIPT_DIR/core/codex_oauth.py"; then
+            if uv run python "$SCRIPT_DIR/codex_oauth.py"; then
                 CODEX_CRED_DETECTED=true
             else
                 echo ""
-                echo -e "${RED}  OAuth login failed or was cancelled.${NC}"
-                echo ""
-                echo -e "  To authenticate manually, visit:"
-                echo -e "  ${CYAN}https://auth.openai.com/authorize?client_id=app_EMoamEEZ73f0CkXaXp7hrann&response_type=code&redirect_uri=http://localhost:1455/auth/callback&scope=openid%20profile%20email%20offline_access${NC}"
-                echo ""
-                echo -e "  Or run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
+                echo -e "${RED}  OAuth login failed.${NC}"
+                echo -e "  You can also run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
                 echo ""
                 SELECTED_PROVIDER_ID=""
             fi
@@ -1058,132 +879,48 @@ case $choice in
         ;;
 esac
 
-# For API-key providers: prompt for key (allow replacement if already set)
-if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ]; then
-    while true; do
-        CURRENT_KEY="${!SELECTED_ENV_VAR}"
-        if [ -n "$CURRENT_KEY" ]; then
-            # Key exists — offer to keep or replace
-            MASKED_KEY="${CURRENT_KEY:0:4}...${CURRENT_KEY: -4}"
-            echo ""
-            echo -e "  ${GREEN}⬢${NC} Current key: ${DIM}$MASKED_KEY${NC}"
-            read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
-        else
-            # No key — prompt for one
-            echo ""
-            echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
-            echo ""
-            read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
-        fi
+# For API-key providers: prompt for key if not already set
+if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTED_ENV_VAR}" ]; then
+    echo ""
+    echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
+    echo ""
+    read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
 
-        if [ -n "$API_KEY" ]; then
-            # Remove old export line(s) for this env var from shell rc, then append new
-            sed -i.bak "/^export ${SELECTED_ENV_VAR}=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
-            echo "" >> "$SHELL_RC_FILE"
-            echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
-            echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
-            export "$SELECTED_ENV_VAR=$API_KEY"
-            echo ""
-            echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
-            # Health check the new key
-            echo -n "  Verifying API key... "
-            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" 2>/dev/null) || true
-            HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
-            HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
-            if [ "$HC_VALID" = "True" ]; then
-                echo -e "${GREEN}ok${NC}"
-                break
-            elif [ "$HC_VALID" = "False" ]; then
-                echo -e "${RED}failed${NC}"
-                echo -e "  ${YELLOW}⚠ $HC_MSG${NC}"
-                # Undo the save so the user can retry cleanly
-                sed -i.bak "/^export ${SELECTED_ENV_VAR}=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
-                # Remove the comment line we just added
-                sed -i.bak "/^# Hive Agent Framework - $PROVIDER_NAME API key$/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
-                unset "$SELECTED_ENV_VAR"
-                echo ""
-                read -r -p "  Press Enter to try again: " _
-                # Loop back to key prompt
-            else
-                echo -e "${YELLOW}--${NC}"
-                echo -e "  ${DIM}Could not verify key (network issue). The key has been saved.${NC}"
-                break
-            fi
-        elif [ -z "$CURRENT_KEY" ]; then
-            # No existing key and user skipped — abort provider
-            echo ""
-            echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
-            SELECTED_ENV_VAR=""
-            SELECTED_PROVIDER_ID=""
-            break
-        else
-            # User pressed Enter with existing key — keep it, proceed normally
-            break
-        fi
-    done
+    if [ -n "$API_KEY" ]; then
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
+        echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+        export "$SELECTED_ENV_VAR=$API_KEY"
+        echo ""
+        echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
+    else
+        echo ""
+        echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
+        SELECTED_ENV_VAR=""
+        SELECTED_PROVIDER_ID=""
+    fi
 fi
 
-# For ZAI subscription: prompt for API key (allow replacement if already set)
+# For ZAI subscription: always prompt for API key
 if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-    while true; do
-        if [ "$ZAI_CRED_DETECTED" = true ] && [ -n "$ZAI_API_KEY" ]; then
-            # Key exists — offer to keep or replace
-            MASKED_KEY="${ZAI_API_KEY:0:4}...${ZAI_API_KEY: -4}"
-            echo ""
-            echo -e "  ${GREEN}⬢${NC} Current ZAI key: ${DIM}$MASKED_KEY${NC}"
-            read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
-        else
-            # No key — prompt for one
-            echo ""
-            read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
-        fi
+    echo ""
+    read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
 
-        if [ -n "$API_KEY" ]; then
-            sed -i.bak "/^export ZAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
-            echo "" >> "$SHELL_RC_FILE"
-            echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
-            echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
-            export ZAI_API_KEY="$API_KEY"
-            echo ""
-            echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
-            # Health check the new key
-            echo -n "  Verifying ZAI API key... "
-            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "zai" "$API_KEY" "https://api.z.ai/api/coding/paas/v4" 2>/dev/null) || true
-            HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
-            HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
-            if [ "$HC_VALID" = "True" ]; then
-                echo -e "${GREEN}ok${NC}"
-                break
-            elif [ "$HC_VALID" = "False" ]; then
-                echo -e "${RED}failed${NC}"
-                echo -e "  ${YELLOW}⚠ $HC_MSG${NC}"
-                # Undo the save so the user can retry cleanly
-                sed -i.bak "/^export ZAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
-                sed -i.bak "/^# Hive Agent Framework - ZAI Code subscription API key$/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
-                unset ZAI_API_KEY
-                ZAI_CRED_DETECTED=false
-                echo ""
-                read -r -p "  Press Enter to try again: " _
-                # Loop back to key prompt
-            else
-                echo -e "${YELLOW}--${NC}"
-                echo -e "  ${DIM}Could not verify key (network issue). The key has been saved.${NC}"
-                break
-            fi
-        elif [ "$ZAI_CRED_DETECTED" = false ] || [ -z "$ZAI_API_KEY" ]; then
-            # No existing key and user skipped — abort provider
-            echo ""
-            echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
-            echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
-            SELECTED_ENV_VAR=""
-            SELECTED_PROVIDER_ID=""
-            SUBSCRIPTION_MODE=""
-            break
-        else
-            # User pressed Enter with existing key — keep it, proceed normally
-            break
-        fi
-    done
+    if [ -n "$API_KEY" ]; then
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
+        echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+        export ZAI_API_KEY="$API_KEY"
+        echo ""
+        echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
+    else
+        echo ""
+        echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
+        echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
+        SELECTED_ENV_VAR=""
+        SELECTED_PROVIDER_ID=""
+        SUBSCRIPTION_MODE=""
+    fi
 fi
 
 # Prompt for model if not already selected (manual provider path)
@@ -1211,34 +948,6 @@ fi
 echo ""
 
 # ============================================================
-# Step 4b: Browser Automation (GCU) — always enabled
-# ============================================================
-
-echo -e "${GREEN}⬢${NC} Browser automation enabled"
-
-# Patch gcu_enabled into configuration.json
-if [ -f "$HIVE_CONFIG_FILE" ]; then
-    uv run python -c "
-import json
-with open('$HIVE_CONFIG_FILE') as f:
-    config = json.load(f)
-config['gcu_enabled'] = True
-with open('$HIVE_CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
-"
-else
-    mkdir -p "$HIVE_CONFIG_DIR"
-    uv run python -c "
-import json
-config = {'gcu_enabled': True, 'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'}
-with open('$HIVE_CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
-"
-fi
-
-echo ""
-
-# ============================================================
 # Step 5: Initialize Credential Store
 # ============================================================
 
@@ -1249,15 +958,9 @@ echo ""
 
 HIVE_CRED_DIR="$HOME/.hive/credentials"
 
-HIVE_KEY_FILE="$HOME/.hive/secrets/credential_key"
-
-# Check if HIVE_CREDENTIAL_KEY already exists (from env, file, or shell rc)
+# Check if HIVE_CREDENTIAL_KEY already exists (from env or shell rc)
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${GREEN}  ✓ HIVE_CREDENTIAL_KEY already set${NC}"
-elif [ -f "$HIVE_KEY_FILE" ]; then
-    HIVE_CREDENTIAL_KEY=$(cat "$HIVE_KEY_FILE")
-    export HIVE_CREDENTIAL_KEY
-    echo -e "${GREEN}  ✓ HIVE_CREDENTIAL_KEY loaded from $HIVE_KEY_FILE${NC}"
 else
     # Generate a new Fernet encryption key
     echo -n "  Generating encryption key... "
@@ -1270,14 +973,13 @@ else
     else
         echo -e "${GREEN}ok${NC}"
 
-        # Save to dedicated secrets file (chmod 600)
-        mkdir -p "$(dirname "$HIVE_KEY_FILE")"
-        chmod 700 "$(dirname "$HIVE_KEY_FILE")"
-        echo -n "$GENERATED_KEY" > "$HIVE_KEY_FILE"
-        chmod 600 "$HIVE_KEY_FILE"
+        # Save to shell rc file
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SHELL_RC_FILE"
+        echo "export HIVE_CREDENTIAL_KEY=\"$GENERATED_KEY\"" >> "$SHELL_RC_FILE"
         export HIVE_CREDENTIAL_KEY="$GENERATED_KEY"
 
-        echo -e "${GREEN}  ✓ Encryption key saved to $HIVE_KEY_FILE${NC}"
+        echo -e "${GREEN}  ✓ Encryption key saved to $SHELL_RC_FILE${NC}"
     fi
 fi
 
@@ -1348,10 +1050,25 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ skills... "
-if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
-    echo -e "${GREEN}${SKILL_COUNT} found${NC}"
+echo -n "  - skills... "
+SKILL_SUMMARIES=()
+for candidate in "$SCRIPT_DIR/.agents/skills" "$SCRIPT_DIR/.agent/skills" "$SCRIPT_DIR/.cursor/skills" "$SCRIPT_DIR/.claude/skills"; do
+    if [ -d "$candidate" ]; then
+        SKILL_COUNT=$(ls -1d "$candidate"/*/ 2>/dev/null | wc -l)
+        SKILLS_SOURCE="$(basename "$(dirname "$candidate")")/skills"
+        SKILL_SUMMARIES+=("${GREEN}${SKILL_COUNT} found${NC} ${DIM}(${SKILLS_SOURCE})${NC}")
+    fi
+done
+
+if [ ${#SKILL_SUMMARIES[@]} -gt 0 ]; then
+    SKILLS_LINE=""
+    for entry in "${SKILL_SUMMARIES[@]}"; do
+        if [ -n "$SKILLS_LINE" ]; then
+            SKILLS_LINE+="; "
+        fi
+        SKILLS_LINE+="$entry"
+    done
+    echo -e "$SKILLS_LINE"
 else
     echo -e "${YELLOW}--${NC}"
 fi
@@ -1374,6 +1091,15 @@ else
     CODEX_AVAILABLE=false
 fi
 
+echo -n "  - claude CLI... "
+if command -v claude > /dev/null 2>&1; then
+    echo -e "${GREEN}available${NC}"
+    CLAUDE_AVAILABLE=true
+else
+    echo -e "${YELLOW}--${NC}"
+    CLAUDE_AVAILABLE=false
+fi
+
 echo -n "  ⬡ local settings... "
 if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
     echo -e "${GREEN}ok${NC}"
@@ -1386,13 +1112,6 @@ fi
 
 echo -n "  ⬡ credential store... "
 if [ -n "$HIVE_CREDENTIAL_KEY" ] && [ -d "$HOME/.hive/credentials/credentials" ]; then
-    echo -e "${GREEN}ok${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
-fi
-
-echo -n "  ⬡ frontend... "
-if [ -f "$SCRIPT_DIR/core/frontend/dist/index.html" ]; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}--${NC}"
@@ -1475,74 +1194,59 @@ fi
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${BOLD}Credential Store:${NC}"
     echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted)"
+    echo -e "  ${DIM}Set up agent credentials with:${NC} ${CYAN}/hive-credentials${NC}"
     echo ""
 fi
 
-# Show tool summary
-TOOL_COUNTS=$(uv run python -c "
-from fastmcp import FastMCP
-from aden_tools.tools import register_all_tools
-mv = FastMCP('v')
-v = register_all_tools(mv, include_unverified=False)
-ma = FastMCP('a')
-a = register_all_tools(ma, include_unverified=True)
-print(f'{len(v)}|{len(a) - len(v)}')
-" 2>/dev/null)
-if [ -n "$TOOL_COUNTS" ]; then
-    VERIFIED=$(echo "$TOOL_COUNTS" | cut -d'|' -f1)
-    UNVERIFIED=$(echo "$TOOL_COUNTS" | cut -d'|' -f2)
-    echo -e "${BOLD}Tools:${NC}"
-    echo -e "  ${GREEN}⬢${NC} ${VERIFIED} verified    ${DIM}${UNVERIFIED} unverified available${NC}"
-    echo -e "  ${DIM}Enable unverified: INCLUDE_UNVERIFIED_TOOLS=true${NC}"
-    echo -e "  ${DIM}Learn more: docs/tools.md${NC}"
+echo -e "${BOLD}Build a New Agent:${NC}"
+echo ""
+echo -e "  If your coding client supports Hive skills, run:"
+echo -e "     ${CYAN}/hive${NC}"
+echo -e "     ${CYAN}/hive-test${NC}"
+echo -e "     ${CYAN}/hive-credentials${NC}"
+echo ""
+
+if [ "$CLAUDE_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Claude Code:${NC}"
+    echo -e "  1. Run: ${CYAN}claude${NC}"
+    echo -e "  2. Then run: ${CYAN}/hive${NC}"
     echo ""
 fi
 
-# Show Codex instructions if available
 if [ "$CODEX_AVAILABLE" = true ]; then
-    echo -e "${BOLD}Build a New Agent (Codex):${NC}"
-    echo ""
-    echo -e "  Codex ${GREEN}${CODEX_VERSION}${NC} is available. To use it with Hive:"
-    echo -e "  1. Restart your terminal (or open a new one)"
-    echo -e "  2. Run: ${CYAN}codex${NC}"
-    echo -e "  3. Type: ${CYAN}use hive${NC}"
+    echo -e "${BOLD}Codex:${NC}"
+    echo -e "  1. Run: ${CYAN}codex${NC}"
+    echo -e "  2. Type: ${CYAN}use hive${NC}"
     echo ""
 fi
 
-# Auto-launch dashboard if frontend was built
-if [ "$FRONTEND_BUILT" = true ]; then
-    echo -e "${BOLD}Launching dashboard...${NC}"
-    echo ""
-    echo -e "  ${DIM}Starting server on http://localhost:8787${NC}"
-    echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
-    echo ""
-    echo -e "  ${DIM}Tip: You can restart the dashboard anytime with:${NC} ${CYAN}hive open${NC}"
-    echo ""
-    # exec replaces the quickstart process with hive open
-    exec "$SCRIPT_DIR/hive" open
-else
-    # No frontend — show manual instructions
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BOLD}⚠️  IMPORTANT: Load your new configuration${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
-    echo -e "  To use them, either:"
-    echo ""
-    echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
-    echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
-    echo ""
-    echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
-    echo ""
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-
-    echo -e "${BOLD}Run an Agent:${NC}"
-    echo ""
-    echo -e "  Launch the interactive dashboard to browse and run agents:"
-    echo -e "  You can start an example agent or an agent built by yourself:"
-    echo -e "     ${CYAN}hive open${NC}"
-    echo ""
-    echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
+if [ -d "$SCRIPT_DIR/.cursor/skills" ]; then
+    echo -e "${BOLD}Cursor:${NC}"
+    echo -e "  Open this repo in Cursor and use Hive skills from ${CYAN}.cursor/skills${NC}"
     echo ""
 fi
+
+# Prompt user to source shell config or start new terminal
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}⚠️  IMPORTANT: Load your new configuration${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
+echo -e "  To use them, either:"
+echo ""
+echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
+echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
+echo ""
+echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
+echo ""
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+echo -e "${BOLD}Run an Agent:${NC}"
+echo ""
+echo -e "  Launch the interactive dashboard to browse and run agents:"
+echo -e "  You can start an example agent or an agent built by yourself:"
+echo -e "     ${CYAN}hive tui${NC}"
+echo ""
+echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
+echo ""
