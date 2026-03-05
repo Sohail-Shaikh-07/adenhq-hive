@@ -10,6 +10,8 @@ import logging
 import os
 from dataclasses import dataclass
 
+from framework.credentials.client_hints import get_credential_fix_guidance_lines
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,6 +56,14 @@ def ensure_credential_key_env() -> None:
     except ImportError:
         pass
 
+
+def build_missing_credentials_error(missing_entries: list[str]) -> str:
+    """Build a client-agnostic credential error message."""
+    lines = ["Missing required credentials:\n"]
+    lines.extend(missing_entries)
+    lines.append("")
+    lines.extend(get_credential_fix_guidance_lines())
+    return "\n".join(lines)
 
 @dataclass
 class CredentialStatus:
@@ -516,3 +526,4 @@ def _status_to_missing(c: CredentialStatus):
         credential_id=c.credential_id,
         credential_key=c.credential_key,
     )
+
