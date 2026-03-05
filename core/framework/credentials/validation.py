@@ -57,14 +57,6 @@ def ensure_credential_key_env() -> None:
         pass
 
 
-def build_missing_credentials_error(missing_entries: list[str]) -> str:
-    """Build a client-agnostic credential error message."""
-    lines = ["Missing required credentials:\n"]
-    lines.extend(missing_entries)
-    lines.append("")
-    lines.extend(get_credential_fix_guidance_lines())
-    return "\n".join(lines)
-
 @dataclass
 class CredentialStatus:
     """Status of a single required credential after validation."""
@@ -169,7 +161,9 @@ class CredentialValidationResult:
                     f"  {c.env_var} for {_label(c)}"
                     f"\n    Connect this integration at hive.adenhq.com first."
                 )
-        lines.append("\nIf you've already set up credentials, restart your terminal to load them.")
+        if lines:
+            lines.append("")
+        lines.extend(get_credential_fix_guidance_lines())
         return "\n".join(lines)
 
 

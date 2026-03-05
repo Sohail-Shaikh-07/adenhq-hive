@@ -4,11 +4,32 @@ from framework.credentials.client_hints import (
     detect_client_environment,
     get_credential_fix_guidance_lines,
 )
-from framework.credentials.validation import build_missing_credentials_error
+from framework.credentials.validation import CredentialStatus, CredentialValidationResult
 
 
 def _clear_client_env(monkeypatch) -> None:
     monkeypatch.delenv("HIVE_CLIENT", raising=False)
+
+
+def _build_missing_result(env_var: str) -> CredentialValidationResult:
+    status = CredentialStatus(
+        credential_name="test_credential",
+        credential_id="test_credential",
+        env_var=env_var,
+        description="",
+        help_url="",
+        api_key_instructions="",
+        tools=["llm_generate"],
+        node_types=[],
+        available=False,
+        valid=None,
+        validation_message=None,
+        aden_supported=False,
+        direct_api_key_supported=True,
+        credential_key="api_key",
+        aden_not_connected=False,
+    )
+    return CredentialValidationResult(credentials=[status], has_aden_key=False)
 
 
 def test_detect_client_environment_defaults_to_generic(monkeypatch):
@@ -45,18 +66,18 @@ def test_guidance_includes_skill_hint_for_known_client(monkeypatch):
     assert "/hive-credentials" in guidance
 
 
-def test_build_missing_credentials_error_is_client_agnostic_by_default(monkeypatch):
+def test_format_error_message_is_client_agnostic_by_default(monkeypatch):
     _clear_client_env(monkeypatch)
 
-    message = build_missing_credentials_error(["  OPENAI_API_KEY for llm_generate nodes"])
+    message = _build_missing_result("OPENAI_API_KEY").format_error_message()
     assert "Claude Code" not in message
     assert "/hive-credentials" not in message
     assert "OPENAI_API_KEY" in message
 
 
-def test_build_missing_credentials_error_can_include_skill_hint(monkeypatch):
+def test_format_error_message_can_include_skill_hint(monkeypatch):
     _clear_client_env(monkeypatch)
     monkeypatch.setenv("HIVE_CLIENT", "claude")
 
-    message = build_missing_credentials_error(["  ANTHROPIC_API_KEY for llm_generate nodes"])
+    message = _build_missing_result("ANTHROPIC_API_KEY").format_error_message()
     assert "/hive-credentials" in message
